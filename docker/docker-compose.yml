@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  fsiem-claude:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: fortisiem-ai:latest
+    container_name: fsiem-claude
+    network_mode: host   # Required for OAuth callback
+    
+    environment:
+      # FortiSIEM connection — set these or use a .env file
+      - FSIEM_HOST=${FSIEM_HOST:-https://your-fortisiem-host}
+      - FSIEM_USER=${FSIEM_USER:-admin}
+      - FSIEM_PASS=${FSIEM_PASS:-}   # SECURITY: Use Docker secrets or .env file — never hardcode
+      - FSIEM_ORG=${FSIEM_ORG:-super}
+      - FSIEM_VERIFY_SSL=${FSIEM_VERIFY_SSL:-false}
+    
+    volumes:
+      # Persist Claude credentials and plugin config across container restarts
+      - ~/.claude:/home/fsiem/.claude
+      
+      # Optional: mount a local project directory
+      - ./project:/home/fsiem/project
+    
+    stdin_open: true
+    tty: true

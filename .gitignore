@@ -1,0 +1,33 @@
+# Environment / credentials
+.env
+*.env
+!.env.example
+!docker/.env.example
+
+# Investigation data (may contain real incident details)
+investigation_*.json
+reports/*.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/projects/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

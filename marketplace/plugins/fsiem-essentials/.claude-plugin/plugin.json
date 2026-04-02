@@ -1,0 +1,9 @@
+{
+  "name": "fsiem-essentials",
+  "version": "2.0.0",
+  "description": "FortiSIEM essentials plugin \u2014 incident triage, threat hunting, UEBA, IOC management, correlation rules, IR playbooks, compliance reporting, MSSP multi-org, and ITSM integration",
+  "author": {
+    "name": "TechOwl Infosec",
+    "email": "info@techowl.in"
+  }
+}

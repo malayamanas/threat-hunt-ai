@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "fsiem-marketplace",
+  "description": "Hunt with FortiSIEM \u2013 AI-powered threat hunting, incident response, and detection engineering plugins",
+  "owner": {
+    "name": "TechOwl Infosec",
+    "email": "info@techowl.in"
+  },
+  "plugins": [
+    {
+      "name": "fsiem-essentials",
+      "description": "Comprehensive FortiSIEM integration: incident management, event queries, CMDB, rule engineering, threat hunting, and multi-org reporting",
+      "source": "./plugins/fsiem-essentials",
+      "category": "security",
+      "version": "2.0.0"
+    }
+  ]
+}
