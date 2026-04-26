@@ -1,32 +1,87 @@
 # Plugin Generator
 
-`generate_plugin.py` — AI-powered Claude Code plugin scaffold generator.
+`generate_plugin.py` — generates a Claude Code plugin scaffold by invoking
+`claude -p` from the repository root. Claude uses its own Write tool to create
+all files directly on disk.
 
-Describe any software, tool, or domain in plain English. The script invokes
-`claude -p` from the repository root so Claude Code uses its own Write tool to
-create a complete, production-ready plugin scaffold directly on disk — no
-templates, no output parsing, no boilerplate to delete.
+---
+
+## Does It Produce a Perfect Plugin?
+
+**No. It produces a correct, installable scaffold — not a finished plugin.**
+
+Understanding this distinction upfront will save you frustration:
+
+| What the generator produces | What you still need to add |
+|---|---|
+| Correct directory structure, all 19 files | Real API calls in `scripts/*.py` |
+| Valid YAML frontmatter on every file | Domain-specific query patterns in skills |
+| Consistent slug / prefix / env var naming | Actual endpoint URLs and auth flow |
+| Working `argparse` CLI (`--help` runs) | Responses that return real data |
+| `marketplace.json` entry (plugin installs) | Testing against a live system |
+| Claude-readable skill descriptions | Edge cases and error handling |
+
+Think of it as the difference between a **building frame** and a **finished building**.
+The frame is structurally correct and saves significant time — but the walls,
+plumbing, and wiring are still your work.
+
+### What "correct scaffold" means in practice
+
+The generated `scripts/k8s_helper.py` for a Kubernetes plugin looks like this:
+
+```python
+def cmd_status(cfg: dict, args) -> None:
+    """Cluster health overview — nodes, resource pressure, failing workloads."""
+    host = cfg["host"]
+    # TODO: implement — call host API and print results
+    # url = f"{host}/api/v1/nodes"
+    # data = api_get(url, auth_headers(cfg))
+    print(f"[kubernetes-cluster-health] status: not yet implemented")
+```
+
+A finished version of the same function looks like this:
+
+```python
+def cmd_status(cfg: dict, args) -> None:
+    """Cluster health overview — nodes, resource pressure, failing workloads."""
+    data = api_get(f"{cfg['host']}/api/v1/nodes", auth_headers(cfg))
+    nodes = data.get("items", [])
+    print(f"{'NODE':<30} {'STATUS':<10} {'ROLES':<20} {'VERSION'}")
+    print("-" * 75)
+    for node in nodes:
+        name    = node["metadata"]["name"]
+        roles   = ",".join(k.split("/")[-1] for k in node["metadata"].get("labels", {})
+                           if "node-role.kubernetes.io" in k) or "worker"
+        version = node["status"]["nodeInfo"]["kubeletVersion"]
+        ready   = next((c["status"] for c in node["status"]["conditions"]
+                        if c["type"] == "Ready"), "Unknown")
+        print(f"{name:<30} {ready:<10} {roles:<20} {version}")
+```
+
+The generator gives you the function signature, the docstring, the `cfg` wiring,
+and the commented URL hint. The implementation is yours to write.
 
 ---
 
 ## The Problem It Solves
 
 Building a Claude Code plugin from scratch means creating 19 interdependent
-files in the right directory structure with correct YAML frontmatter, consistent
-naming conventions, matching skill/command/agent cross-references, a valid Python
-CLI script, and a registered entry in `marketplace.json`. Done by hand, this
-takes 2–3 hours and requires deep knowledge of the plugin format.
+files — correct YAML frontmatter, consistent naming across all files, valid
+`plugin.json`, skill/command/agent cross-references, a working Python CLI, and
+a registered `marketplace.json` entry. Done by hand this takes 2–3 hours and
+requires deep knowledge of the plugin format.
 
-This tool reduces that to a single command and a ~60 second wait.
+The generator eliminates the structural work entirely so you start at
+implementation, not at blank files.
 
-| Without this tool | With this tool |
+| Without the generator | With the generator |
 |---|---|
-| Manually create 19 files | One command |
-| Copy-paste from existing plugins, clean up references | Fresh content tailored to your domain |
-| Look up YAML frontmatter format, skill naming rules | Claude reads the repo and matches the format exactly |
-| Write Python CLI boilerplate | Generated script with correct argparse structure |
-| Remember to update marketplace.json | Claude updates it automatically |
-| 2–3 hours | ~60 seconds |
+| Manually create 19 files from scratch | One command |
+| Look up YAML frontmatter field names | Claude reads the repo, matches format exactly |
+| Copy-paste fsiem-essentials, strip all references | Fresh content for your domain |
+| Write argparse boilerplate, helper functions | Generated `get_config()`, `auth_headers()`, `api_get()` |
+| Update marketplace.json by hand | Claude reads and updates it automatically |
+| 2–3 hours of setup | ~60 seconds to a working scaffold |
 
 ---
 
@@ -34,11 +89,10 @@ This tool reduces that to a single command and a ~60 second wait.
 
 | Requirement | Details |
 |---|---|
-| **Claude Code** | Binary must be in `PATH`. Install: `npm install -g @anthropic-ai/claude-code` |
-| **Python 3.9+** | Standard library only — no pip installs needed |
-| **Active Claude session** | `claude` must be authenticated (`claude auth` if not already done) |
+| **Claude Code** | Binary in `PATH`. Install: `npm install -g @anthropic-ai/claude-code` |
+| **Authenticated** | Run `claude auth` if not already logged in |
+| **Python 3.9+** | Stdlib only — no pip installs needed |
 
-Check both are ready:
 ```bash
 claude --version
 python3 --version
@@ -51,19 +105,19 @@ python3 --version
 Run from anywhere in the repository:
 
 ```bash
-# Inline description
+# Pass description directly
 python3 tools/plugin-generator/generate_plugin.py "Kubernetes cluster health monitor"
 
-# Interactive prompt (run with no arguments)
+# Interactive prompt
 python3 tools/plugin-generator/generate_plugin.py
 
-# Pipe description from stdin
+# Pipe from stdin
 echo "GitHub Actions CI/CD pipeline manager" | python3 tools/plugin-generator/generate_plugin.py
 
-# Preview the prompt Claude will receive (does NOT call Claude)
+# Preview the prompt sent to Claude without calling it
 python3 tools/plugin-generator/generate_plugin.py --show-prompt "PostgreSQL query optimizer"
 
-# Skip the project tree in output
+# Skip project tree display
 python3 tools/plugin-generator/generate_plugin.py --no-tree "AWS cost monitor"
 ```
 
@@ -71,8 +125,21 @@ python3 tools/plugin-generator/generate_plugin.py --no-tree "AWS cost monitor"
 
 | Flag | Effect |
 |---|---|
-| `--show-prompt` | Print the full prompt that would be sent to Claude, then exit. No files written, Claude not called. Useful for reviewing or debugging the prompt. |
-| `--no-tree` | Skip printing the current project directory tree. Speeds up the startup output. |
+| `--show-prompt` | Print the full prompt, then exit. Claude is not called, no files written. |
+| `--no-tree` | Skip displaying the project directory tree at startup. |
+
+### Writing a good description
+
+The description is the only domain knowledge Claude has to work with.
+Specificity directly determines the quality of the output.
+
+| Description | What you get |
+|---|---|
+| `"monitoring tool"` | Four generic monitoring skills, five generic commands |
+| `"Prometheus alert manager"` | Alert-specific skills (`alert_rules`, `silences`, `receivers`), commands like `/prom-silence` and `/prom-routes` |
+| `"Prometheus alert manager with silence scheduling, receiver routing, and inhibition rules"` | Highly specific skills and commands matching exactly those three concerns |
+
+More words about the specific capabilities = better generated structure.
 
 ---
 
@@ -82,59 +149,55 @@ python3 tools/plugin-generator/generate_plugin.py --no-tree "AWS cost monitor"
 1  Check claude binary in PATH
    └─ Exits with install instructions if not found
 
-2  Accept input description
-   └─ From CLI argument, stdin pipe, or interactive prompt
+2  Accept description
+   └─ CLI argument, stdin pipe, or interactive prompt
 
-3  Scan the repository tree
-   └─ Passes the live structure to Claude so it matches the existing format
+3  Scan the live repository tree
+   └─ Passed to Claude so generated files match the existing plugin format
 
-4  Derive plugin identifiers
-   └─ slug: kebab-case name from the description (e.g. "kubernetes-cluster-health")
-   └─ prefix: short command prefix (e.g. "k8s", "aws", "db")
-   └─ env_prefix: uppercase env var prefix (e.g. "KUBERNETES_CLUSTER_HEALTH")
-   └─ marketplace name: read from marketplace/.claude-plugin/marketplace.json
+4  Derive plugin identifiers (locally, no Claude call)
+   └─ slug:       kebab-case from description  ("kubernetes-cluster-health")
+   └─ prefix:     short command prefix         ("k8s")
+   └─ env_prefix: uppercase env var prefix     ("KUBERNETES_CLUSTER_HEALTH")
+   └─ marketplace name: read from marketplace.json at runtime
 
-5  Build a structured prompt
-   └─ Includes: description, live repo tree, identifiers, file list with requirements
+5  Build structured prompt
+   └─ Description + live tree + identifiers + per-file requirements
 
-6  Invoke: claude -p "<prompt>" (cwd = repo root)
-   └─ Claude's output streams to your terminal in real time
+6  Invoke: claude -p "<prompt>"  (cwd = repo root)
+   └─ Claude streams output to your terminal in real time
    └─ Claude uses its Write tool to create every file on disk
-   └─ Claude reads and updates marketplace.json with the new plugin entry
+   └─ Claude reads and updates marketplace.json
 
 7  Report created files
-   └─ Lists every file written under marketplace/plugins/<slug>/
-
 8  Print install instructions
-   └─ /plugin marketplace add ...
-   └─ /plugin install <slug>@<marketplace-name>
 ```
 
 ---
 
 ## What Gets Generated
 
-For a description like `"Kubernetes cluster health monitor"`, Claude creates:
+For `"Kubernetes cluster health monitor with pod management"`:
 
 ```
 marketplace/plugins/kubernetes-cluster-health/
 ├── .claude-plugin/
-│   └── plugin.json                      ← Plugin manifest (name, version, description)
-├── CLAUDE.md                            ← Guidelines Claude reads every session
-├── SKILLS_SUMMARY.md                   ← Full skill + command reference
+│   └── plugin.json
+├── CLAUDE.md
+├── SKILLS_SUMMARY.md
 ├── agents/
-│   └── k8s-operator.md                 ← Specialized AI agent for this domain
+│   └── k8s-operator.md
 ├── commands/
-│   ├── init-kubernetes-cluster-health.md  ← /init command with connectivity check
-│   ├── k8s-status.md                   ← /k8s-status slash command
+│   ├── init-kubernetes-cluster-health.md
+│   ├── k8s-status.md
 │   ├── k8s-pods.md
 │   ├── k8s-deploy.md
 │   ├── k8s-logs.md
 │   └── k8s-events.md
 ├── skills/
 │   ├── cluster_health/
-│   │   ├── SKILL.md                    ← Skill definition + auto-invoke triggers
-│   │   └── reference.md               ← Python implementation stub
+│   │   ├── SKILL.md
+│   │   └── reference.md
 │   ├── workload_management/
 │   │   ├── SKILL.md
 │   │   └── reference.md
@@ -145,44 +208,145 @@ marketplace/plugins/kubernetes-cluster-health/
 │       ├── SKILL.md
 │       └── reference.md
 └── scripts/
-    └── k8s_helper.py                   ← Executable Python CLI (stdlib only)
+    └── k8s_helper.py
 ```
 
-And `marketplace/.claude-plugin/marketplace.json` is updated to register the plugin.
+Plus a new entry in `marketplace/.claude-plugin/marketplace.json`.
 
 **Total: 19 plugin files + 1 marketplace.json update.**
 
-### What each file contains
+### Example: generated SKILL.md
 
-| File | Contents |
-|---|---|
-| `plugin.json` | Name, version, description, author — Claude derives all values from your input |
-| `CLAUDE.md` | Domain-specific guidelines: skill table, command table, operational defaults |
-| `SKILLS_SUMMARY.md` | Complete cross-reference of all skills, commands, agents, scripts |
-| `commands/init-*.md` | Session initializer: env var checks, connectivity test, full command menu |
-| `commands/<prefix>-*.md` | Five slash commands with YAML frontmatter, numbered behavior steps, usage examples |
-| `skills/*/SKILL.md` | Four skills with auto-invoke `description:` field, overview, key operations, output format |
-| `skills/*/reference.md` | Python reference implementation using `urllib` (stdlib only) with `get_config()`, `auth_headers()`, main function stub |
-| `agents/*.md` | Agent YAML frontmatter, role description, architecture section, step-by-step workflow |
-| `scripts/*.py` | Executable CLI: `get_config()`, `check_config()`, `auth_headers()`, `api_get()`, per-command `cmd_*()` functions, `argparse` subcommands |
-| `marketplace.json` | Claude reads the current file and appends your plugin's entry with category inferred from the description |
+```markdown
+---
+name: kubernetes-cluster-health-cluster_health
+description: Cluster health monitoring — node status, resource pressure, failing
+  pods. Use this skill when the user asks about kubernetes cluster health.
+---
+# Cluster Health
+
+Node-level health monitoring across the cluster. Surfaces resource pressure,
+unschedulable nodes, and pods in failed or pending states.
+
+## Key Operations
+- Query node readiness and condition flags (MemoryPressure, DiskPressure, PIDPressure)
+- List pods in CrashLoopBackOff, Pending, or OOMKilled state
+- Report resource requests vs allocatable capacity per node
+- Detect unschedulable nodes and cordoned workers
+
+## Output Format
+Table: NODE · STATUS · ROLES · CPU% · MEM% · PODS
+Follow with any failing pods grouped by namespace.
+```
+
+This is accurate and immediately usable as a skill Claude will auto-invoke.
+The gap is in `reference.md` — the Python implementation needs real API calls.
+
+### Example: generated command
+
+```markdown
+---
+name: k8s-status
+description: Cluster health overview — nodes, resource pressure, failing workloads
+---
+# Command: /k8s-status
+# Usage: /k8s-status [--namespace <ns>]
+
+## Description
+Cluster health overview — nodes, resource pressure, failing workloads.
+
+## Behavior
+1. Read configuration from environment variables
+2. Query node status and resource conditions via Kubernetes API
+3. List pods in failed, pending, or crash-loop state
+4. Present results as a structured table
+5. Recommend next steps based on findings
+
+## Example Invocations
+- `/k8s-status`
+- `/k8s-status --namespace kube-system`
+```
+
+The structure and frontmatter are correct. The behavior steps are real but
+abstract — step 2 says "query via API" without knowing your auth method
+(kubeconfig, service account token, in-cluster).
+
+### Example: generated Python script (what you receive)
+
+```python
+#!/usr/bin/env python3
+"""
+k8s_helper.py — Kubernetes cluster health helper.
+
+Usage:
+    python3 k8s_helper.py status
+    python3 k8s_helper.py pods
+    python3 k8s_helper.py deploy
+
+Required environment variables:
+    KUBERNETES_CLUSTER_HEALTH_HOST    Kubernetes API server URL
+    KUBERNETES_CLUSTER_HEALTH_TOKEN   Bearer token for authentication
+"""
+
+import os, sys, json, argparse, urllib.request, urllib.error
+
+def get_config() -> dict:
+    return {
+        "host":  os.environ.get("KUBERNETES_CLUSTER_HEALTH_HOST", "").rstrip("/"),
+        "token": os.environ.get("KUBERNETES_CLUSTER_HEALTH_TOKEN", ""),
+        "org":   os.environ.get("KUBERNETES_CLUSTER_HEALTH_ORG", ""),
+    }
+
+def check_config() -> dict:
+    cfg = get_config()
+    if not cfg["host"]:
+        print("ERROR: KUBERNETES_CLUSTER_HEALTH_HOST is not set", file=sys.stderr)
+        sys.exit(1)
+    return cfg
+
+def auth_headers(cfg: dict) -> dict:
+    h = {"Accept": "application/json", "Content-Type": "application/json"}
+    if cfg["token"]:
+        h["Authorization"] = f"Bearer {cfg['token']}"
+    return h
+
+def api_get(url: str, headers: dict) -> dict:
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        print(f"HTTP {e.code}: {e.read().decode()[:200]}", file=sys.stderr)
+        sys.exit(1)
+
+def cmd_status(cfg: dict, args) -> None:
+    """Cluster health overview — nodes, resource pressure, failing workloads."""
+    host = cfg["host"]
+    # TODO: implement — call host API and print results
+    # url = f"{host}/api/v1/nodes"
+    # data = api_get(url, auth_headers(cfg))
+    print(f"[kubernetes-cluster-health] status: not yet implemented")
+```
+
+The helper functions (`get_config`, `check_config`, `auth_headers`, `api_get`)
+are complete and production-quality. Only the `cmd_*` function bodies need work.
 
 ---
 
 ## What to Expect During Generation
-
-When you run the script, you will see:
 
 ```
 Checking Claude Code installation...
   ✓  /usr/local/bin/claude
 
 Plugin description:
-  Kubernetes cluster health monitor
+  Kubernetes cluster health monitor with pod management
 
 Current project structure:
   FortiSIEM-Threat-Hunting-Using-AI/
   ├── marketplace/
+  │   └── plugins/
+  │       └── fsiem-essentials/
   ...
 
 Plugin identifiers:
@@ -195,34 +359,21 @@ Calling Claude Code to generate plugin files...
   (Claude will write files directly using its Write tool)
 ```
 
-After that, **Claude's own output streams to your terminal** — you will see Claude's
-reasoning and tool calls in real time as it writes each file. This is normal Claude
-Code behavior. Example output from Claude:
+Claude's output then streams live to your terminal — you see each file being
+written in real time. **Typical time: 45–90 seconds.**
 
-```
-I'll create a complete Kubernetes cluster health monitor plugin. Let me start
-with the plugin manifest and work through all required files.
-
-[Writing .claude-plugin/plugin.json...]
-[Writing CLAUDE.md...]
-[Writing skills/cluster_health/SKILL.md...]
-...
-```
-
-**Typical generation time: 45–90 seconds** depending on network latency and
-the complexity of the domain.
-
-After Claude finishes:
+After Claude finishes, the script lists every created file:
 
 ```
 Plugin files written (19 total):
   + marketplace/plugins/kubernetes-cluster-health/.claude-plugin/plugin.json
   + marketplace/plugins/kubernetes-cluster-health/CLAUDE.md
+  + marketplace/plugins/kubernetes-cluster-health/SKILLS_SUMMARY.md
   ...
 
 Install the new plugin:
 
-  /plugin marketplace add /path/to/repo/marketplace
+  /plugin marketplace add /Users/you/repo/marketplace
   /plugin install kubernetes-cluster-health@fsiem-marketplace
   /reload-plugins
   /init-kubernetes-cluster-health
@@ -230,60 +381,117 @@ Install the new plugin:
 
 ---
 
-## After Generation
+## After Generation: Closing the Gap
 
-### 1. Install and verify
-```bash
-# In a Claude Code session:
+The scaffold is a starting point. Here is the realistic path from scaffold to
+working plugin.
+
+### Step 1 — Install and confirm the structure loads
+
+```
 /plugin marketplace add /path/to/repo/marketplace
-/plugin install <slug>@<marketplace-name>
+/plugin install kubernetes-cluster-health@fsiem-marketplace
 /reload-plugins
-/init-<slug>
+/init-kubernetes-cluster-health
 ```
 
-### 2. Fill in the TODOs in the script
-Every generated `scripts/*.py` has TODO comments marking where real API calls go:
-```python
-def cmd_status(cfg: dict, args) -> None:
-    """Show cluster health."""
-    host = cfg["host"]
-    # TODO: implement — call host API and print results
-    # url = f"{host}/api/v1/status"
-    # data = api_get(url, auth_headers(cfg))
+You should see the command menu. The plugin is loaded but commands return
+"not yet implemented."
+
+### Step 2 — Implement the Python script
+
+Open a Claude Code session and point it at the generated script and your
+target system's API docs:
+
 ```
-Replace these with actual API calls for your target system.
+Read marketplace/plugins/kubernetes-cluster-health/scripts/k8s_helper.py.
 
-### 3. Enrich the skills
-Generated `SKILL.md` files contain accurate overrides but minimal detail.
-Expand the **Key Operations** section with domain-specific queries, filters,
-and real API patterns your use case needs.
+Then implement cmd_status() to call GET /api/v1/nodes on the Kubernetes
+API server using the token in cfg["token"], and print a table of:
+node name | Ready status | CPU allocatable | Memory allocatable | Pod count
 
-### 4. Set environment variables
-The generated script reads from env vars named `<ENV_PREFIX>_HOST`, `<ENV_PREFIX>_TOKEN`, etc.
-Set these before running:
+The Kubernetes nodes API response has this shape:
+{"items": [{"metadata": {"name": "..."}, "status": {"conditions": [...],
+"allocatable": {"cpu": "...", "memory": "..."}}}]}
+```
+
+Claude Code will read the file, understand the existing helpers, and write
+a working implementation.
+
+### Step 3 — Enrich the skills
+
+The generated `SKILL.md` files are structurally correct but thin on detail.
+After implementing the script, update the **Key Operations** sections with
+the actual queries and filters your commands use:
+
+**Generated (thin):**
+```markdown
+## Key Operations
+- Query current status and health
+- Identify issues and anomalies
+- Recommend remediation actions
+- Automate common cluster_health tasks
+```
+
+**Enriched (useful):**
+```markdown
+## Key Operations
+- `GET /api/v1/nodes` — node readiness, MemoryPressure, DiskPressure, PIDPressure conditions
+- `GET /api/v1/pods?fieldSelector=status.phase=Failed` — failed pods cluster-wide
+- `GET /apis/apps/v1/deployments` — deployment replica status and rollout state
+- Node NotReady for >5 min → escalate; CrashLoopBackOff >3 restarts → investigate logs
+```
+
+### Step 4 — Set environment variables
+
 ```bash
-export KUBERNETES_CLUSTER_HEALTH_HOST="https://your-k8s-api"
-export KUBERNETES_CLUSTER_HEALTH_TOKEN="your-token"
+export KUBERNETES_CLUSTER_HEALTH_HOST="https://your-k8s-api-server:6443"
+export KUBERNETES_CLUSTER_HEALTH_TOKEN="$(kubectl get secret ... -o jsonpath=...)"
+```
+
+### Full before/after example
+
+**Before (generated, ~60 seconds):**
+```
+/k8s-status  →  "[kubernetes-cluster-health] status: not yet implemented"
+```
+
+**After (30–60 min of implementation work):**
+```
+/k8s-status
+
+NODE                           STATUS     ROLES         VERSION
+──────────────────────────────────────────────────────────────────
+prod-node-01                   Ready      control-plane v1.28.4
+prod-node-02                   Ready      worker        v1.28.4
+prod-node-03                   NotReady   worker        v1.28.4   ← MemoryPressure
+
+FAILING PODS (2)
+  kube-system / coredns-abc123    CrashLoopBackOff  (8 restarts)
+  default / api-server-xyz        OOMKilled         (2 restarts)
+
+Recommendation: prod-node-03 has memory pressure — check running pods.
+  /k8s-logs coredns-abc123 --namespace kube-system
 ```
 
 ---
 
 ## Slug and Prefix Derivation
 
-The script derives identifiers locally (without calling Claude) so they are
-consistent before Claude starts writing files:
+Identifiers are derived locally (before Claude is called) for consistency:
 
-| Input | Slug | Prefix |
-|---|---|---|
-| `"Kubernetes cluster health monitor"` | `kubernetes-cluster-health` | `k8s` |
-| `"GitHub Actions CI/CD manager"` | `github-actions-ci-cd` | `gha` |
-| `"PostgreSQL schema migration tool"` | `postgresql-schema-migration` | `db` |
-| `"AWS cost optimization"` | `aws-cost-optimization` | `aws` |
-| `"Custom internal workflow"` | `custom-internal-workflow` | `cust` |
+| Input description | Slug | Prefix | Env prefix |
+|---|---|---|---|
+| `"Kubernetes cluster health monitor"` | `kubernetes-cluster-health` | `k8s` | `KUBERNETES_CLUSTER_HEALTH` |
+| `"GitHub Actions CI/CD manager"` | `github-actions-ci-cd` | `gha` | `GITHUB_ACTIONS_CI_CD` |
+| `"PostgreSQL schema migration tool"` | `postgresql-schema-migration` | `db` | `POSTGRESQL_SCHEMA_MIGRATION` |
+| `"AWS cost optimization"` | `aws-cost-optimization` | `aws` | `AWS_COST_OPTIMIZATION` |
+| `"Prometheus alert silence manager"` | `prometheus-alert-silence` | `mon` | `PROMETHEUS_ALERT_SILENCE` |
+| `"Custom internal approval workflow"` | `custom-internal-approval` | `cust` | `CUSTOM_INTERNAL_APPROVAL` |
 
-Stop words (`a`, `the`, `and`, `build`, `create`, `tool`, etc.) are stripped
-from the slug. The prefix is matched against a domain keyword table; unknown
-domains fall back to initials of the slug words.
+Stop words (`a`, `the`, `and`, `build`, `create`, `tool`, `app`, etc.) are
+stripped. Domain keywords (`kubernetes`, `aws`, `docker`, etc.) map to known
+prefixes. Unknown domains use initials of the slug words.
 
 ---
 
@@ -292,26 +500,29 @@ domains fall back to initials of the slug words.
 **`ERROR: Claude Code binary not found`**
 ```bash
 npm install -g @anthropic-ai/claude-code
-# then re-open terminal or:
 export PATH="$PATH:$(npm root -g)/.bin"
 ```
 
 **`claude exited with code 1`**
-Claude Code is not authenticated. Run `claude auth` and complete the login flow.
+Not authenticated. Run `claude auth` and complete the login flow, then retry.
 
 **Plugin directory already exists**
-The script prompts before overwriting. Answer `y` to regenerate, `n` to abort.
+The script prompts before overwriting. Answer `y` to regenerate all files,
+`n` to abort and keep the existing plugin.
 
-**Generated files look generic / not domain-specific**
-Try a more specific description. Compare:
-- Vague: `"monitoring tool"` → generic output
-- Specific: `"Prometheus alert manager with silence and routing rule management"` → targeted output
+**Output looks generic, not specific to my domain**
+Use a more specific description. Add the names of key operations, APIs, or
+concepts your plugin will cover:
+- Too vague: `"monitoring tool"` → generic skills
+- Better: `"Datadog monitor management with downtime scheduling and SLO tracking"` → targeted skills
 
 **Fewer than 19 files were created**
-Claude occasionally truncates long responses. Run again — the prompt is
-deterministic so results are consistent across runs.
+Claude occasionally truncates. Run the generator again — the prompt is
+identical each run so you will get a complete result on retry.
 
-**Paths in install instructions point to wrong directory**
-The marketplace path in the output is computed from the actual file location
-at runtime. If it looks wrong, copy the path from the "Current project structure"
-section shown at startup.
+**`/plugin install` says marketplace not found**
+Register the marketplace first:
+```
+/plugin marketplace add /absolute/path/to/repo/marketplace
+```
+The marketplace path printed by the script is always the correct absolute path.
