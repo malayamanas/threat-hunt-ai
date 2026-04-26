@@ -22,7 +22,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-REPO_ROOT        = Path(__file__).parent.resolve()
+REPO_ROOT        = Path(__file__).parent.parent.parent.resolve()
 MARKETPLACE_DIR  = REPO_ROOT / "marketplace"
 PLUGINS_DIR      = MARKETPLACE_DIR / "plugins"
 MARKETPLACE_JSON = MARKETPLACE_DIR / ".claude-plugin" / "marketplace.json"
