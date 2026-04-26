@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """
-generate_plugin.py — Claude Code Plugin Generator (Claude-Powered)
+generate_plugin.py — Claude Code Plugin Generator
 
 Verifies the Claude Code binary, scans the current marketplace structure,
-builds a context-rich prompt, and invokes `claude -p` to generate a complete
-plugin scaffold tailored to the input description.  Every file's content
-comes from Claude — no hardcoded templates.
+then invokes `claude -p` from the repo root so Claude uses its own Write
+tool to create every plugin file directly — no template generation, no
+output parsing.  Claude writes the files; we just drive the invocation.
 
 Usage:
     python3 generate_plugin.py "Kubernetes cluster health monitor"
-    python3 generate_plugin.py                   # interactive prompt
+    python3 generate_plugin.py                    # interactive prompt
     echo "GitHub Actions CI/CD manager" | python3 generate_plugin.py
-    python3 generate_plugin.py --dry-run "..."   # preview paths without writing
+    python3 generate_plugin.py --show-prompt "…"  # print prompt and exit
 """
 
-import os
-import sys
 import re
+import sys
 import json
 import shutil
 import argparse
 import subprocess
-import threading
-import time
 from pathlib import Path
 
 REPO_ROOT        = Path(__file__).parent.resolve()
@@ -36,13 +33,12 @@ def bold(s):   return f"\033[1m{s}\033[0m"
 def green(s):  return f"\033[32m{s}\033[0m"
 def yellow(s): return f"\033[33m{s}\033[0m"
 def dim(s):    return f"\033[2m{s}\033[0m"
-def cyan(s):   return f"\033[36m{s}\033[0m"
 
 
 # ── 1. Locate Claude Code binary ──────────────────────────────────────────────
 
 def check_claude() -> str:
-    """Return path to the claude binary or print install instructions and exit."""
+    """Return path to claude binary or print install instructions and exit."""
     path = shutil.which("claude")
     if path:
         return path
@@ -61,8 +57,6 @@ def check_claude() -> str:
     print("Install:")
     print("  npm install -g @anthropic-ai/claude-code")
     print("  Or download from: https://claude.ai/download")
-    print()
-    print("Verify with: claude --version")
     sys.exit(1)
 
 
@@ -98,12 +92,12 @@ def get_input_text(args) -> str:
 
 # ── 3. Project tree ───────────────────────────────────────────────────────────
 
-_SKIP = {".git", "__pycache__", ".DS_Store", "node_modules", ".mypy_cache",
-         ".pytest_cache", ".ruff_cache", "dist", "build"}
+_SKIP = {".git", "__pycache__", ".DS_Store", "node_modules",
+         ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build"}
 
 def _tree_lines(root: Path, prefix: str = "", depth: int = 4) -> list:
     if depth == 0:
-        return ["  " + prefix + "  ..."]
+        return [prefix + "  ..."]
     try:
         entries = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
     except PermissionError:
@@ -128,7 +122,7 @@ def print_project_tree(root: Path):
     print()
 
 
-# ── 4. Minimal spec (slug + prefix only — content comes from Claude) ──────────
+# ── 4. Plugin slug + prefix (naming only — all content comes from Claude) ─────
 
 _STOP = {
     "a","an","the","and","or","for","of","with","by","in","on","to","from",
@@ -138,25 +132,25 @@ _STOP = {
 }
 
 _DOMAIN_PREFIXES = {
-    "kubernetes": "k8s",  "k8s": "k8s",  "pod": "k8s",
-    "github":     "gh",   "gitlab": "gl",
-    "actions":    "gha",  "ci/cd": "gha",  "pipeline": "pipe",
-    "terraform":  "tf",   "pulumi": "iac",  "ansible": "iac",
-    "aws":        "aws",  "amazon": "aws",
-    "gcp":        "gcp",  "azure": "az",
-    "docker":     "dkr",  "container": "dkr",
-    "django":     "dj",   "flask": "api",  "fastapi": "api",
-    "react":      "fe",   "vue": "fe",  "frontend": "fe",
-    "postgresql": "db",   "postgres": "db",  "mysql": "db",  "sql": "db",
-    "mongodb":    "mdb",  "redis": "rdb",  "elastic": "es",
-    "prometheus": "mon",  "grafana": "mon",  "monitoring": "mon",
-    "security":   "sec",  "vulnerability": "sec",
-    "pytest":     "test", "jest": "test",  "testing": "test",
-    "airflow":    "data", "spark": "data",  "dbt": "data",
-    "machine":    "ml",   "mlflow": "ml",  "model": "ml",
-    "jira":       "pm",   "kanban": "pm",
-    "slack":      "ntfy", "teams": "ntfy",
-    "linux":      "sys",  "bash": "sys",  "server": "sys",
+    "kubernetes":"k8s", "k8s":"k8s", "pod":"k8s",
+    "github":"gh", "gitlab":"gl",
+    "actions":"gha", "ci/cd":"gha", "pipeline":"pipe",
+    "terraform":"tf", "pulumi":"iac", "ansible":"iac",
+    "aws":"aws", "amazon":"aws",
+    "gcp":"gcp", "azure":"az",
+    "docker":"dkr", "container":"dkr",
+    "django":"dj", "flask":"api", "fastapi":"api",
+    "react":"fe", "vue":"fe", "frontend":"fe",
+    "postgresql":"db", "postgres":"db", "mysql":"db", "sql":"db",
+    "mongodb":"mdb", "redis":"rdb", "elastic":"es",
+    "prometheus":"mon", "grafana":"mon", "monitoring":"mon",
+    "security":"sec", "vulnerability":"sec",
+    "pytest":"test", "jest":"test", "testing":"test",
+    "airflow":"data", "spark":"data", "dbt":"data",
+    "machine":"ml", "mlflow":"ml", "model":"ml",
+    "jira":"pm", "kanban":"pm",
+    "slack":"ntfy", "teams":"ntfy",
+    "linux":"sys", "bash":"sys", "server":"sys",
 }
 
 def _slugify(text: str) -> str:
@@ -171,286 +165,186 @@ def _make_prefix(text: str, slug: str) -> str:
         if kw in tl:
             return pfx
     parts = slug.split("-")
-    if len(parts) == 1:
-        return parts[0][:5]
-    return "".join(p[0] for p in parts[:5])
+    return "".join(p[0] for p in parts[:5]) if len(parts) > 1 else parts[0][:5]
 
 def build_spec(text: str) -> dict:
     slug       = _slugify(text)
     prefix     = _make_prefix(text, slug)
     env_prefix = slug.upper().replace("-", "_")
     return {
-        "slug":       slug,
-        "prefix":     prefix,
-        "env_prefix": env_prefix,
+        "slug":        slug,
+        "prefix":      prefix,
+        "env_prefix":  env_prefix,
         "description": text,
-        "plugin_dir": PLUGINS_DIR / slug,
+        "plugin_dir":  PLUGINS_DIR / slug,
     }
 
 
-# ── 5. Build prompt for Claude ────────────────────────────────────────────────
-
-def build_prompt(spec: dict, repo_tree: str) -> str:
-    slug       = spec["slug"]
-    prefix     = spec["prefix"]
-    env_prefix = spec["env_prefix"]
-    description = spec["description"]
-
-    return f"""You are generating a Claude Code plugin scaffold for this existing marketplace repository.
-
-SOFTWARE / TOOL TO BUILD A PLUGIN FOR:
-{description}
-
-REPOSITORY STRUCTURE (for context and format reference):
-{repo_tree}
-
-PLUGIN METADATA:
-  slug:       {slug}
-  prefix:     {prefix}    (slash command prefix  e.g. /{prefix}-status)
-  env_prefix: {env_prefix}   (env var prefix  e.g. {env_prefix}_HOST)
-
-=== OUTPUT FORMAT ===
-Use EXACTLY this delimiter format for every file. No prose, no markdown fences around the delimiters.
-
->>>FILE: relative/path/from/repo/root
-<complete file contents>
->>>ENDFILE
-
-Start your response immediately with >>>FILE:  (no preamble).
-=== END FORMAT ===
-
-Generate these 19 files, all tailored specifically to: {description}
-
-[1] marketplace/plugins/{slug}/.claude-plugin/plugin.json
-    JSON manifest. Fields: name="{slug}", version="1.0.0", description (one sentence), author object.
-
-[2] marketplace/plugins/{slug}/CLAUDE.md
-    Plugin-level Claude guidelines. Include:
-    - H1 title + one-paragraph overview of {description}
-    - Skills table  (Directory | Skill Name | Purpose)
-    - Commands table (Command | Purpose)
-    - Operational defaults (confirm before destructive ops, table output format, read creds from env vars)
-
-[3] marketplace/plugins/{slug}/SKILLS_SUMMARY.md
-    Full reference. Tables: skills, commands, agent, scripts.
-
-[4] marketplace/plugins/{slug}/commands/init-{slug}.md
-    YAML frontmatter (name: init-{slug}, description: one-line init description).
-    ## Behavior: check env vars, test connectivity, print command menu.
-    ## Session Summary Output: fenced block showing the menu.
-
-[5-9] Five slash commands: marketplace/plugins/{slug}/commands/{prefix}-<name>.md
-    Design 5 meaningful commands for: {description}
-    Each file must have:
-      - YAML frontmatter: name and description fields
-      - ## Description
-      - ## Behavior (numbered steps)
-      - ## Example Invocations (2-3 examples)
-
-[10-17] Four skills (8 files total):
-    marketplace/plugins/{slug}/skills/<skill_name>/SKILL.md
-      YAML frontmatter:
-        name: {slug}-<skill_name>
-        description: <what it does and when Claude should auto-invoke it>
-      ## Overview (2-3 sentences)
-      ## Key Operations (3-4 bullet points)
-      ## Output Format (table columns and structure)
-      Keep under 60 lines. Long implementations go in reference.md.
-
-    marketplace/plugins/{slug}/skills/<skill_name>/reference.md
-      Full Python implementation using only urllib (no third-party libs).
-      Include get_config() reading {env_prefix}_HOST and {env_prefix}_TOKEN from env.
-      One main function implementing the skill with a TODO where the API call goes.
-      Include if __name__ == "__main__": block for standalone use.
-
-[18] marketplace/plugins/{slug}/agents/<agent-name>.md
-    YAML frontmatter (name, description as the agent's full role description).
-    ## Architecture: Python scripts handle data collection, AI agent interprets results.
-    ## Core Script: bash code block showing how to run the main script.
-    ## Workflow: Step 1 collect, Step 2 analyze, Step 3 report.
-    ## Available Commands: list of /{prefix}-* commands.
-
-[19] marketplace/plugins/{slug}/scripts/<script-name>.py
-    Requirements (all must be met):
-    - #!/usr/bin/env python3 shebang
-    - Module docstring with usage examples and required env var list
-    - get_config() → dict reading {env_prefix}_HOST, {env_prefix}_TOKEN, {env_prefix}_ORG
-    - check_config() → validates required vars, prints helpful error and exits if missing
-    - auth_headers(cfg) → returns Authorization header dict
-    - api_get(url, headers) → urllib GET returning parsed JSON, handles HTTPError/URLError
-    - One cmd_<name>(cfg, args) function per command with TODO comment for API call
-    - main() with argparse subparsers, one per command
-    - if __name__ == "__main__": main()
-    - stdlib ONLY — no requests, no boto3, no third-party packages
-
-Generate all 19 files now, starting immediately with >>>FILE:"""
-
-
-# ── 6. Invoke Claude ──────────────────────────────────────────────────────────
-
-def _spinner(stop_event: threading.Event, message: str):
-    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    i = 0
-    while not stop_event.is_set():
-        print(f"\r  {frames[i % len(frames)]}  {message}", end="", flush=True)
-        time.sleep(0.1)
-        i += 1
-    print(f"\r  ✓  {message}          ")
-
-
-def call_claude(claude_path: str, prompt: str) -> str:
-    """Run `claude -p <prompt>` and return stdout. Streams a spinner while waiting."""
-    stop = threading.Event()
-    spin = threading.Thread(
-        target=_spinner,
-        args=(stop, "Claude is generating plugin content..."),
-        daemon=True,
-    )
-    spin.start()
-    try:
-        result = subprocess.run(
-            [claude_path, "-p", prompt],
-            capture_output=True,
-            text=True,
-            timeout=360,
-        )
-    except subprocess.TimeoutExpired:
-        stop.set()
-        spin.join()
-        print(bold("ERROR: claude timed out after 6 minutes."))
-        sys.exit(1)
-    finally:
-        stop.set()
-        spin.join()
-
-    if result.returncode != 0:
-        print(bold(f"ERROR: claude exited with code {result.returncode}"))
-        if result.stderr:
-            print(result.stderr[:600])
-        sys.exit(1)
-
-    return result.stdout
-
-
-# ── 7. Parse Claude's output into {path: content} ────────────────────────────
-
-def parse_output(raw: str) -> dict:
-    """
-    Scan for >>>FILE: / >>>ENDFILE delimiters and return {relative_path: content}.
-    Robust to extra whitespace and missing trailing ENDFILE.
-    """
-    files = {}
-    current_path = None
-    current_lines = []
-
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(">>>FILE:"):
-            # Save previous block
-            if current_path is not None:
-                files[current_path] = "\n".join(current_lines).rstrip() + "\n"
-            current_path = stripped[len(">>>FILE:"):].strip()
-            current_lines = []
-        elif stripped.startswith(">>>ENDFILE") or stripped == ">>>END FILE":
-            if current_path is not None:
-                files[current_path] = "\n".join(current_lines).rstrip() + "\n"
-            current_path = None
-            current_lines = []
-        elif current_path is not None:
-            current_lines.append(line)
-
-    # Handle last block with no closing ENDFILE
-    if current_path and current_lines:
-        files[current_path] = "\n".join(current_lines).rstrip() + "\n"
-
-    return files
-
-
-# ── 8. Write plugin files ─────────────────────────────────────────────────────
-
-def _write(path: Path, content: str, dry_run: bool):
-    rel = path.relative_to(REPO_ROOT)
-    if dry_run:
-        print(f"  {dim('[dry-run]')} {rel}")
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    print(f"  {green('+')} {rel}")
-
-
-def create_plugin(files: dict, spec: dict, dry_run: bool):
-    if not files:
-        print(bold("ERROR: Claude returned no parseable files."))
-        print("  Claude's raw output did not contain any >>>FILE: blocks.")
-        print("  Try running again — the model occasionally misformats the output.")
-        sys.exit(1)
-
-    slug = spec["slug"]
-    print()
-    print(bold(f"Writing {len(files)} files for plugin '{slug}':"))
-    for rel_path, content in sorted(files.items()):
-        abs_path = REPO_ROOT / rel_path
-        _write(abs_path, content, dry_run)
-
-    # chmod +x any generated .py scripts
-    if not dry_run:
-        for rel_path in files:
-            if rel_path.endswith(".py"):
-                p = REPO_ROOT / rel_path
-                if p.exists():
-                    p.chmod(p.stat().st_mode | 0o111)
-
+# ── 5. Marketplace name (read from JSON, never hardcoded) ─────────────────────
 
 def get_marketplace_name() -> str:
-    """Read the marketplace name from marketplace.json (the @handle used in /plugin install)."""
     if MARKETPLACE_JSON.exists():
         try:
-            with open(MARKETPLACE_JSON) as f:
-                data = json.load(f)
+            data = json.loads(MARKETPLACE_JSON.read_text())
             name = data.get("name", "").strip()
             if name:
                 return name
         except (json.JSONDecodeError, OSError):
             pass
-    return MARKETPLACE_DIR.name   # fallback: directory name
+    return MARKETPLACE_DIR.name  # fallback: directory name
 
 
-def update_marketplace(spec: dict, dry_run: bool):
-    if not MARKETPLACE_JSON.exists():
-        print(yellow("  marketplace.json not found — skipping"))
-        return
-    with open(MARKETPLACE_JSON) as f:
-        data = json.load(f)
-    if any(p["name"] == spec["slug"] for p in data.get("plugins", [])):
-        print(yellow(f"  '{spec['slug']}' already in marketplace.json — skipping"))
-        return
-    data.setdefault("plugins", []).append({
-        "name":        spec["slug"],
-        "description": spec["description"],
-        "source":      f"./plugins/{spec['slug']}",
-        "category":    "plugin",
-        "version":     "1.0.0",
-    })
-    _write(MARKETPLACE_JSON, json.dumps(data, indent=2) + "\n", dry_run)
+# ── 6. Build the prompt that Claude will execute ──────────────────────────────
+
+def build_prompt(spec: dict, repo_tree: str) -> str:
+    slug        = spec["slug"]
+    prefix      = spec["prefix"]
+    env_prefix  = spec["env_prefix"]
+    description = spec["description"]
+    mkt_name    = get_marketplace_name()
+
+    return f"""Create a complete Claude Code plugin scaffold in this repository.
+
+SOFTWARE / TOOL TO BUILD FOR:
+{description}
+
+CURRENT REPOSITORY STRUCTURE:
+{repo_tree}
+
+PLUGIN IDENTIFIERS:
+  slug        : {slug}
+  prefix      : {prefix}    (slash command prefix, e.g. /{prefix}-status)
+  env_prefix  : {env_prefix}    (env var prefix, e.g. {env_prefix}_HOST)
+  marketplace : {mkt_name}
+
+YOUR TASK:
+Use the Write tool to create all 19 files listed below inside this repository.
+After writing all plugin files, also update marketplace/.claude-plugin/marketplace.json
+to register the new plugin (add an entry to the "plugins" array).
+
+Make all content specific and meaningful for: {description}
+Do NOT copy content from fsiem-essentials — generate fresh content for this domain.
+
+FILES TO CREATE:
+
+[1] marketplace/plugins/{slug}/.claude-plugin/plugin.json
+    JSON with: name="{slug}", version="1.0.0", description (one sentence about {description}),
+    author object with name and email placeholders.
+
+[2] marketplace/plugins/{slug}/CLAUDE.md
+    Plugin-level Claude guidelines. Include:
+    - H1 title + overview paragraph for {description}
+    - Skills table: Directory | Skill Name | Purpose
+    - Commands table: Command | Purpose
+    - Operational defaults section
+
+[3] marketplace/plugins/{slug}/SKILLS_SUMMARY.md
+    Full reference tables: skills, commands, agent, scripts.
+
+[4] marketplace/plugins/{slug}/commands/init-{slug}.md
+    YAML frontmatter: name: init-{slug}, description: one-line.
+    ## Behavior: check env vars, test connectivity, print command menu.
+    ## Session Summary Output: fenced block with the full command menu.
+
+[5–9] Five slash commands (one file each):
+    marketplace/plugins/{slug}/commands/{prefix}-<name>.md
+    Design 5 meaningful commands for: {description}
+    Each file: YAML frontmatter (name, description), ## Description,
+    ## Behavior (numbered steps), ## Example Invocations.
+
+[10–17] Four skills (two files each):
+
+    marketplace/plugins/{slug}/skills/<skill_name>/SKILL.md
+      YAML frontmatter:
+        name: {slug}-<skill_name>
+        description: what it does and when Claude should auto-invoke it
+      ## Overview (2–3 sentences)
+      ## Key Operations (3–4 bullets)
+      ## Output Format
+      Keep under 60 lines; move long code to reference.md.
+
+    marketplace/plugins/{slug}/skills/<skill_name>/reference.md
+      Python reference implementation.
+      Use urllib only (no requests / no third-party libs).
+      get_config() reads {env_prefix}_HOST and {env_prefix}_TOKEN from env.
+      One main function with a TODO where the real API call goes.
+      if __name__ == "__main__": block for standalone use.
+
+[18] marketplace/plugins/{slug}/agents/<agent-name>.md
+    YAML frontmatter: name, description (full agent role).
+    ## Architecture, ## Core Script, ## Workflow, ## Available Commands.
+
+[19] marketplace/plugins/{slug}/scripts/<script-name>.py
+    #!/usr/bin/env python3 shebang.
+    Docstring: usage examples + required env vars ({env_prefix}_HOST, {env_prefix}_TOKEN).
+    Helper functions: get_config(), check_config(), auth_headers(cfg), api_get(url, headers).
+    One cmd_<name>(cfg, args) per command with TODO for API call.
+    main() with argparse subparsers.
+    stdlib ONLY — no requests, no boto3, no third-party packages.
+
+Write all 19 files now.
+
+Then update marketplace/.claude-plugin/marketplace.json:
+- Read the current file
+- Add a new entry to the "plugins" array:
+  {{
+    "name":        "{slug}",
+    "description": "{description}",
+    "source":      "./plugins/{slug}",
+    "category":    "<choose the most accurate single-word category for: {description}>",
+    "version":     "1.0.0"
+  }}
+- Write the updated JSON back (preserve all existing entries)"""
+
+
+# ── 7. Invoke Claude Code (writes files via its own Write tool) ───────────────
+
+def call_claude(claude_path: str, prompt: str):
+    """
+    Run `claude -p <prompt>` from the repo root.
+    Claude's output streams directly to the terminal — Claude uses its
+    Write tool to create every plugin file in place.
+    Exits the script if claude returns a non-zero exit code.
+    """
+    result = subprocess.run(
+        [claude_path, "-p", prompt],
+        cwd=str(REPO_ROOT),   # gives Claude file-system access to the whole repo
+    )
+    if result.returncode != 0:
+        print()
+        print(bold(f"ERROR: claude exited with code {result.returncode}"))
+        sys.exit(1)
+
+
+# ── 8. Verify and report what Claude created ──────────────────────────────────
+
+def report_created_files(plugin_dir: Path):
+    if not plugin_dir.exists():
+        print(yellow("  WARNING: plugin directory was not created."))
+        return 0
+    files = sorted(f for f in plugin_dir.rglob("*") if f.is_file())
+    print(bold(f"\nPlugin files written ({len(files)} total):"))
+    for f in files:
+        print(f"  {green('+')} {f.relative_to(REPO_ROOT)}")
+    return len(files)
 
 
 # ── 9. Main ───────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate a Claude Code plugin scaffold via claude -p.",
+        description="Generate a Claude Code plugin by invoking `claude -p` in the repo.",
         epilog=(
             "Examples:\n"
             "  python3 generate_plugin.py \"Kubernetes cluster health monitor\"\n"
-            "  python3 generate_plugin.py --dry-run \"GitHub Actions manager\"\n"
+            "  python3 generate_plugin.py \"GitHub Actions CI/CD manager\"\n"
             "  echo \"Django REST API\" | python3 generate_plugin.py\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("description", nargs="*", help="Plugin description")
-    parser.add_argument("--dry-run",  action="store_true", help="Preview paths without writing files")
-    parser.add_argument("--no-tree",  action="store_true", help="Skip project tree display")
-    parser.add_argument("--show-prompt", action="store_true", help="Print the prompt sent to Claude and exit")
+    parser.add_argument("--no-tree",     action="store_true", help="Skip project tree display")
+    parser.add_argument("--show-prompt", action="store_true", help="Print the prompt and exit without calling Claude")
     args = parser.parse_args()
 
     # ── Step 1: Verify claude binary ──────────────────────────────────────────
@@ -469,26 +363,27 @@ def main():
     if not args.no_tree:
         print_project_tree(REPO_ROOT)
 
-    # ── Step 4: Derive slug / prefix (naming only) ────────────────────────────
+    # ── Step 4: Derive slug / prefix for naming ────────────────────────────────
     spec = build_spec(text)
     print(bold("Plugin identifiers:"))
-    print(f"  slug       : {spec['slug']}")
-    print(f"  prefix     : {spec['prefix']}")
-    print(f"  env prefix : {spec['env_prefix']}")
+    print(f"  slug        : {spec['slug']}")
+    print(f"  prefix      : {spec['prefix']}")
+    print(f"  env prefix  : {spec['env_prefix']}")
+    print(f"  marketplace : {get_marketplace_name()}")
 
     # ── Step 5: Build prompt ──────────────────────────────────────────────────
     prompt = build_prompt(spec, repo_tree)
 
     if args.show_prompt:
         print()
-        print(bold("Prompt that would be sent to Claude:"))
+        print(bold("Prompt sent to Claude:"))
         print(dim("─" * 60))
         print(prompt)
         print(dim("─" * 60))
         sys.exit(0)
 
-    # ── Step 6: Confirm if plugin directory already exists ────────────────────
-    if not args.dry_run and spec["plugin_dir"].exists():
+    # ── Step 6: Guard against overwriting existing plugin ─────────────────────
+    if spec["plugin_dir"].exists():
         print()
         print(yellow(f"  WARNING: {spec['plugin_dir'].relative_to(REPO_ROOT)} already exists."))
         try:
@@ -500,40 +395,26 @@ def main():
             print("  Aborted.")
             sys.exit(0)
 
-    # ── Step 7: Call Claude ───────────────────────────────────────────────────
+    # ── Step 7: Call Claude — it writes all files via its Write tool ──────────
     print()
-    print(bold("Calling Claude Code..."))
-    raw_output = call_claude(claude_path, prompt)
-
-    # ── Step 8: Parse output ──────────────────────────────────────────────────
-    files = parse_output(raw_output)
-    print(cyan(f"  Parsed {len(files)} files from Claude's response"))
-
-    if len(files) < 10:
-        print(yellow(f"  WARNING: expected ~19 files, got {len(files)}."))
-        print(yellow("  Claude may have truncated. Consider running again."))
-
-    # ── Step 9: Write files ───────────────────────────────────────────────────
-    create_plugin(files, spec, args.dry_run)
-
-    # ── Step 10: Update marketplace.json ─────────────────────────────────────
+    print(bold("Calling Claude Code to generate plugin files..."))
+    print(dim("  (Claude will write files directly using its Write tool)"))
     print()
-    print(bold("Updating marketplace.json..."))
-    update_marketplace(spec, args.dry_run)
+    call_claude(claude_path, prompt)
 
-    # ── Step 11: Install instructions ────────────────────────────────────────
-    slug = spec["slug"]
+    # ── Step 8: Report what was created ───────────────────────────────────────
+    report_created_files(spec["plugin_dir"])
+
+    # ── Step 9: Install instructions ─────────────────────────────────────────
+    slug            = spec["slug"]
     marketplace_name = get_marketplace_name()
     print()
-    if args.dry_run:
-        print(bold("Dry run complete — no files written."))
-    else:
-        print(bold("Plugin created. Install it:"))
-        print()
-        print(f"  /plugin marketplace add {MARKETPLACE_DIR}")
-        print(f"  /plugin install {slug}@{marketplace_name}")
-        print(f"  /reload-plugins")
-        print(f"  /init-{slug}")
+    print(bold("Install the new plugin:"))
+    print()
+    print(f"  /plugin marketplace add {MARKETPLACE_DIR}")
+    print(f"  /plugin install {slug}@{marketplace_name}")
+    print(f"  /reload-plugins")
+    print(f"  /init-{slug}")
     print()
 
 
