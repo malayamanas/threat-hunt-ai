@@ -13,6 +13,13 @@
       "source": "./plugins/fsiem-essentials",
       "category": "security",
       "version": "2.0.0"
+    },
+    {
+      "name": "github-actions-ci-cd",
+      "description": "GitHub Actions CI/CD pipeline manager",
+      "source": "./plugins/github-actions-ci-cd",
+      "category": "github_actions",
+      "version": "1.0.0"
     }
   ]
 }

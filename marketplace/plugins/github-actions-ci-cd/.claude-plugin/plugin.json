@@ -1,0 +1,9 @@
+{
+  "name": "github-actions-ci-cd",
+  "version": "1.0.0",
+  "description": "GitHub Actions CI/CD pipeline manager",
+  "author": {
+    "name": "Your Name",
+    "email": "you@example.com"
+  }
+}
