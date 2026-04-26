@@ -78,7 +78,7 @@ implementation, not at blank files.
 |---|---|
 | Manually create 19 files from scratch | One command |
 | Look up YAML frontmatter field names | Claude reads the repo, matches format exactly |
-| Copy-paste fsiem-essentials, strip all references | Fresh content for your domain |
+| Copy-paste an existing plugin, strip all references | Fresh content for your domain |
 | Write argparse boilerplate, helper functions | Generated `get_config()`, `auth_headers()`, `api_get()` |
 | Update marketplace.json by hand | Claude reads and updates it automatically |
 | 2–3 hours of setup | ~60 seconds to a working scaffold |
@@ -102,23 +102,23 @@ python3 --version
 
 ## Usage
 
-Run from anywhere in the repository:
+Run from the repository root:
 
 ```bash
 # Pass description directly
-python3 tools/plugin-generator/generate_plugin.py "Kubernetes cluster health monitor"
+python3 generate_plugin.py "Kubernetes cluster health monitor"
 
 # Interactive prompt
-python3 tools/plugin-generator/generate_plugin.py
+python3 generate_plugin.py
 
 # Pipe from stdin
-echo "GitHub Actions CI/CD pipeline manager" | python3 tools/plugin-generator/generate_plugin.py
+echo "GitHub Actions CI/CD pipeline manager" | python3 generate_plugin.py
 
 # Preview the prompt sent to Claude without calling it
-python3 tools/plugin-generator/generate_plugin.py --show-prompt "PostgreSQL query optimizer"
+python3 generate_plugin.py --show-prompt "PostgreSQL query optimizer"
 
 # Skip project tree display
-python3 tools/plugin-generator/generate_plugin.py --no-tree "AWS cost monitor"
+python3 generate_plugin.py --no-tree "AWS cost monitor"
 ```
 
 ### Flags
@@ -343,17 +343,18 @@ Plugin description:
   Kubernetes cluster health monitor with pod management
 
 Current project structure:
-  FortiSIEM-Threat-Hunting-Using-AI/
+  your-plugin-repo/
   ├── marketplace/
+  │   ├── .claude-plugin/
+  │   │   └── marketplace.json
   │   └── plugins/
-  │       └── fsiem-essentials/
   ...
 
 Plugin identifiers:
   slug        : kubernetes-cluster-health
   prefix      : k8s
   env prefix  : KUBERNETES_CLUSTER_HEALTH
-  marketplace : fsiem-marketplace
+  marketplace : my-marketplace      ← read from marketplace/.claude-plugin/marketplace.json
 
 Calling Claude Code to generate plugin files...
   (Claude will write files directly using its Write tool)
@@ -374,7 +375,7 @@ Plugin files written (19 total):
 Install the new plugin:
 
   /plugin marketplace add /Users/you/repo/marketplace
-  /plugin install kubernetes-cluster-health@fsiem-marketplace
+  /plugin install kubernetes-cluster-health@my-marketplace
   /reload-plugins
   /init-kubernetes-cluster-health
 ```
@@ -390,7 +391,7 @@ working plugin.
 
 ```
 /plugin marketplace add /path/to/repo/marketplace
-/plugin install kubernetes-cluster-health@fsiem-marketplace
+/plugin install kubernetes-cluster-health@my-marketplace
 /reload-plugins
 /init-kubernetes-cluster-health
 ```
